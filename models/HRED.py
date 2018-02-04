@@ -10,7 +10,7 @@ class HREDModel(BaseTFModel):
         super(HREDModel, self).__init__(config, mode, scope)
 
     def _build_graph(self):
-        self._build_placeholders()
+        self._create_placeholders()
         self._build_embeddings()
         self._build_encoder()
         self._build_decoder()
@@ -25,7 +25,7 @@ class HREDModel(BaseTFModel):
                                                       ] + self.grad_norm_summary)
         pass
 
-    def _build_placeholders(self):
+    def _create_placeholders(self):
         with tf.variable_scope("placeholders"):
             batch_size = None
             dialog_turn_size = None
@@ -126,6 +126,9 @@ class HREDModel(BaseTFModel):
 
                 # training
                 if self.mode != ModelMode.infer: # not infer, do decode turn by turn
+
+                    turn_emb_inp = dialog_emb_inp[:, 1:, :-1, :]
+
                     turn_index = tf.constant(0, dtype=tf.int32, name='turn_time_index')
                     turn_loss = tf.constant(0, dtype=tf.float32, name='turn_loss')
 

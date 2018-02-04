@@ -11,7 +11,7 @@ class DialogBatchInput(
     pass
 
 
-class DialogIterator(object):
+class Iterator(object):
     def __init__(self, dialog_data, batch_size, sos_idx, eos_idx, pad_idx=0,
                  max_len=None, max_turn=None, infer=False, shuffle=False):
         self._dialog_data = dialog_data
@@ -100,6 +100,78 @@ class DialogIterator(object):
             start_idx += self.batch_size
 
 
+class DialogIterator(object):
+    def __init__(self, dialog_data,
+                 batch_size,
+                 sos_idx,
+                 eos_idx,
+                 pad_idx=0,
+                 max_len=None,
+                 max_turn=None,
+                 infer=False):
+
+        self._dialog_data = dialog_data
+        self._batch_size = batch_size
+        self._sos_idx = sos_idx
+        self._eos_idx = eos_idx
+        self._pad_idx = pad_idx
+        self._max_len = max_len
+        self._max_turn = max_turn
+        self._infer = infer
+
+        # generate context response pairs
+        self._context_response_pairs = self.generate_context_response_pairs(self._dialog_data)
+
+        self.num_dialogs = len(self._dialog_data)
+        self.num_samples = len(self._context_response_pairs)
+        self.num_batches = math.ceil(self.num_samples / batch_size)
+
+    def generate_context_response_pairs(self, dialog_data):
+        ctx_resp_pairs = []
+        ignore_samples = 0
+        for dialog in dialog_data:
+            turns = len(dialog)
+            if turns < 2:
+                ignore_samples += 1
+                continue
+            for i in range(turns-1):
+                ii = 0 if i <= self._max_len else i - self._max_len
+                ctx = dialog[ii:i+1]
+                resp = dialog[i+1]
+                ctx_resp_pairs.append((ctx, resp))
+
+        print("generate context-response paris over; dialog samples:%d; pairs num:%d; ignored samples:%d" %
+              (len(self._dialog_data), len(ctx_resp_pairs), ignore_samples))
+        return ctx_resp_pairs
+
+    def make_bucket_batches(self):
+        pass
+
+
+def get_dialog_data_iter(vocab:Vocabulary,
+                         dialog_file,
+                         batch_size,
+                         max_len=None,
+                         max_turn=None,
+                         model="HRED",
+                         infer=False,
+                         shuffle=False):
+    dialog_data = load_dialog_data(dialog_file, '</d>')
+    dialog_idx = [[vocab.convert2idx(sent) for sent in dialog] for dialog in dialog_data]
+
+    if model == 'HRED':
+        data_iter = DialogIterator(dialog_data=dialog_idx,
+                                   batch_size=batch_size,
+                             sos_idx=vocab.sos_idx,
+                             eos_idx=vocab.eos_idx,
+                             pad_idx=vocab.pad_idx,
+                             max_len=max_len,
+                             max_turn=max_turn,
+                             infer=infer)
+        return data_iter
+    else:
+        raise NotImplementedError("Not Implemented Data Iterator")
+
 def get_data_iter(vocab:Vocabulary,
                   dialog_file,
                   batch_size,
@@ -113,15 +185,15 @@ def get_data_iter(vocab:Vocabulary,
     dialog_idx = [[vocab.convert2idx(sent) for sent in dialog] for dialog in dialog_data]
 
     if model == 'HRED':
-        data_iter = DialogIterator(dialog_data=dialog_idx,
-                                   batch_size=batch_size,
-                                   sos_idx=vocab.sos_idx,
-                                   eos_idx=vocab.eos_idx,
-                                   pad_idx=vocab.pad_idx,
-                                   max_len=max_len,
-                                   max_turn=max_turn,
-                                   infer=infer,
-                                   shuffle=shuffle)
+        data_iter = Iterator(dialog_data=dialog_idx,
+                             batch_size=batch_size,
+                             sos_idx=vocab.sos_idx,
+                             eos_idx=vocab.eos_idx,
+                             pad_idx=vocab.pad_idx,
+                             max_len=max_len,
+                             max_turn=max_turn,
+                             infer=infer,
+                             shuffle=shuffle)
         return data_iter
     else:
         raise NotImplementedError("Not Implemented Data Iterator")
@@ -146,7 +218,7 @@ def get_train_iter(data_dir, vocab, config):
                                max_turn=config.max_turn,
                                model=config.model,
                                infer=False,
-                               shuffle=False)
+                               shuffle=True)
 
     test_file = os.path.join(data_dir, 'test.%s.txt' % config.prefix)
     test_iter = get_data_iter(vocab=vocab,

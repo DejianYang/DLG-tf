@@ -43,9 +43,11 @@ class HREDConfig(BaseConfig):
     init_w = 0.1  # init weight scale
 
     max_turn = 10
+    batch_size = 32
 
     #infer options
     beam_size = 5
+    infer_batch_size = 16
     infer_max_len = 100
     length_penalty_weight = 0.0
 
@@ -67,7 +69,7 @@ class HREDTestConfig(HREDConfig):
 
     batch_size =  16
     display_frequency = 10  # display_frequency
-    checkpoint_frequency = 10  # checkpoint frequency
+    checkpoint_frequency = 100  # checkpoint frequency
 
 
 
