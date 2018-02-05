@@ -73,7 +73,7 @@ def train(args):
 
     start_time = time.time()
     train_iter, valid_iter, test_iter = get_train_iter(args.data_dir, vocab=vocab, config=model_config)
-    print('-'*20)
+    print('-'*100)
     print('... load train and valid data iterator over, cost:\t%.2f s' % (time.time() - start_time))
     print('... train iterator samples:\t%d' % train_iter.num_samples)
     print('... valid iterator samples:\t%d' % valid_iter.num_samples)
@@ -91,12 +91,14 @@ def train(args):
     utils.mkdir_not_exists(pred_dir)
     ckpt_path = os.path.join(ckpt_dir, model_config.model)
 
-    valid_context_file = os.path.join(args.data_dir, 'valid.context.txt')
+    valid_context_file = os.path.join(args.data_dir, 'valid.source.txt')
     valid_response_file = os.path.join(args.data_dir, 'valid.response.txt')
 
-    test_context_file = os.path.join(args.data_dir, 'test.context.txt')
+    test_context_file = os.path.join(args.data_dir, 'test.source.txt')
     test_response_file = os.path.join(args.data_dir, 'test.response.txt')
 
+    print('=' * 100)
+    print('... building model')
     start_time = time.time()
     if model_config.model == 'HRED':
         model = HREDModel
@@ -130,8 +132,7 @@ def train(args):
         for batch_data in train_iter.next_batch():
             # print("batch data shape:", batch_data.dialog.shape, "batch length shape:", batch_data.dialog_length.shape)
             # print(batch_data.dialog_length)
-
-            step_loss, step_ppl, step_predict_count, batch_size, step_summary, global_step, _ = \
+            step_loss, step_ppl, step_predict_count, batch_size, step_summary, global_step = \
                 train_model.train(sess, batch_data)
 
             ckpt_samples += batch_size

@@ -96,7 +96,7 @@ class BaseTFModel(object):
     def _build_graph(self):
         raise NotImplementedError
 
-    def _create_placeholders(self):
+    def _build_placeholders(self):
         raise NotImplementedError
 
     def _compute_loss(self):

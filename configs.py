@@ -51,6 +51,7 @@ class HREDConfig(BaseConfig):
     infer_max_len = 100
     length_penalty_weight = 0.0
 
+    buckets = [(4, 128), (6, 64), (8, 64), (10, 32)] # buckets config(turn_size, batch_size)
 
 class HREDTestConfig(HREDConfig):
     model = "HRED"

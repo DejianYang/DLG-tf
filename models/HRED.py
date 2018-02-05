@@ -1,5 +1,5 @@
 # -*- coding:utf-8 -*-
-import tensorflow as tf
+
 import tensorflow.contrib.seq2seq as tc_seq2seq
 from tensorflow.python.layers import core as layers_core
 from models.model_base import *
@@ -10,7 +10,7 @@ class HREDModel(BaseTFModel):
         super(HREDModel, self).__init__(config, mode, scope)
 
     def _build_graph(self):
-        self._create_placeholders()
+        self._build_placeholders()
         self._build_embeddings()
         self._build_encoder()
         self._build_decoder()
@@ -18,44 +18,53 @@ class HREDModel(BaseTFModel):
             self._compute_loss()
             if self.mode == ModelMode.train:
                 self.create_optimizer(self.loss)
-                # Summary
-                self.train_summary = tf.summary.merge([
-                                                          tf.summary.scalar("lr", self.learning_rate),
-                                                          tf.summary.scalar("train_loss", self.loss),
-                                                      ] + self.grad_norm_summary)
-        pass
+                # Training Summary
+                self.train_summary = tf.summary.merge([tf.summary.scalar("lr", self.learning_rate),
+                                                        tf.summary.scalar("train_loss", self.loss)]
+                                                      + self.grad_norm_summary)
 
-    def _create_placeholders(self):
+    def _build_placeholders(self):
         with tf.variable_scope("placeholders"):
             batch_size = None
             dialog_turn_size = None
             dialog_sent_size = None
 
-            self.dialog_input = tf.placeholder(tf.int32,
-                                                shape=[batch_size, dialog_turn_size, dialog_sent_size],
-                                                name="dialog_inputs")
-            self.dialog_length = tf.placeholder(tf.int32,
-                                                      shape=[batch_size, dialog_turn_size],
-                                                      name='dialog_input_lengths')
+            self.source = tf.placeholder(tf.int32,
+                                         shape=[batch_size, dialog_turn_size, dialog_sent_size],
+                                         name="dialog_inputs")
+
+            self.source_length = tf.placeholder(tf.int32,
+                                                shape=[batch_size, dialog_turn_size],
+                                                name='dialog_input_lengths')
+
+            self.target_input = tf.placeholder(tf.int32,
+                                               shape=[batch_size, None],
+                                               name="response_input_sent")
+            self.target_output = tf.placeholder(tf.int32,
+                                                shape=[batch_size, None],
+                                                name="response_output_sent")
+            self.target_length = tf.placeholder(tf.int32,
+                                                shape=[None],
+                                                name="target_length")
 
             self.dropout_keep_prob = tf.placeholder(tf.float32)
 
-            self.batch_size = tf.shape(self.dialog_input)[0]
-            self.turn_size = tf.shape(self.dialog_input)[1]
-            self.sent_size = tf.shape(self.dialog_input)[2]
-            self.dialog_turn_length = tf.reduce_sum(tf.sign(self.dialog_length), axis=1)
-            pass
+            self.batch_size = tf.shape(self.source)[0]
+            self.turn_size = tf.shape(self.source)[1]
+            self.sent_size = tf.shape(self.source)[2]
+
+            if self.mode != ModelMode.infer:
+                self.predict_count = tf.reduce_sum(self.target_length)
 
     def _build_embeddings(self):
         with tf.variable_scope("dialog_embeddings"):
-            self.dialog_embeddings = tf.get_variable("dialog_embeddings",
+            dialog_embeddings = tf.get_variable("dialog_embeddings",
                                                      shape=[self.config.vocab_size, self.config.emb_size],
                                                      dtype=tf.float32,
                                                      trainable=True)
-            self._dialog_input_embs = tf.nn.embedding_lookup(self.dialog_embeddings,
-                                                             tf.reshape(self.dialog_input,
-                                                                        [self.batch_size*self.turn_size, self.sent_size]))
-            print("dialog utterance embedding shape:", self._dialog_input_embs.shape)
+            # share encoder and decoder vocabulary
+            self.encoder_embeddings = dialog_embeddings
+            self.decoder_embeddings = dialog_embeddings
 
     def _build_encoder(self):
         with tf.variable_scope("dialog_encoder"):
@@ -64,9 +73,14 @@ class HREDModel(BaseTFModel):
                                          hidden_size=self.config.enc_hidden_size,
                                          num_layers=self.config.num_layers,
                                          dropout_keep_prob=self.dropout_keep_prob)
+
+                uttn_emb_inp = tf.nn.embedding_lookup(self.encoder_embeddings,
+                                                      tf.reshape(self.source, [-1, self.sent_size]))
+                print('utterance input embs shape', uttn_emb_inp.shape)
+
                 _, uttn_states = tf.nn.dynamic_rnn(uttn_cell,
-                                                   inputs=self._dialog_input_embs,
-                                                   sequence_length=tf.reshape(self.dialog_length, [-1]),
+                                                   inputs=uttn_emb_inp,
+                                                   sequence_length=tf.reshape(self.source_length, [-1]),
                                                    dtype=tf.float32)
 
                 uttn_states = tf.reshape(uttn_states, [self.batch_size,
@@ -80,28 +94,43 @@ class HREDModel(BaseTFModel):
                                         num_layers=self.config.num_layers,
                                         dropout_keep_prob=self.dropout_keep_prob)
 
+                context_turn_length = tf.reduce_sum(tf.sign(self.source_length), axis=1)
+
                 ctx_outputs, ctx_state = tf.nn.dynamic_rnn(ctx_cell,
                                                            inputs=uttn_states,
-                                                           sequence_length=self.dialog_turn_length,
+                                                           sequence_length=context_turn_length,
                                                            dtype=tf.float32)
-                self._enc_outputs = ctx_outputs
-                self._enc_state = ctx_state
+                self.encoder_outputs = ctx_outputs
+                self.encoder_state = ctx_state
 
-    @staticmethod
-    def _compute_turn_loss(turn_logits, turn_output, length):
-        batch_size = tf.shape(turn_output)[0]
-        max_time = tf.shape(turn_output)[1]
 
-        cross_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=turn_output,
-                                                                    logits=turn_logits)
-        weights = tf.sequence_mask(length,
-                                   maxlen=max_time,
-                                   dtype=turn_logits.dtype)
+    def _build_decoder_cell(self, enc_outputs, enc_state):
+        beam_size = self.config.beam_size
+        context_length = self.source_length
+        memory = enc_outputs
 
-        turn_loss = tf.reduce_sum(cross_loss * weights) / tf.to_float(batch_size)
-        turn_ppl = tf.reduce_sum(cross_loss * weights)
+        if self.mode == ModelMode.infer and beam_size > 0:
+            enc_state = tc_seq2seq.tile_batch(enc_state,
+                                              multiplier=beam_size)
 
-        return turn_loss, turn_ppl
+            memory = tc_seq2seq.tile_batch(memory,
+                                           multiplier=beam_size)
+
+            context_length = tc_seq2seq.tile_batch(context_length,
+                                               multiplier=beam_size)
+
+            batch_size = self.batch_size * beam_size
+
+        else:
+            enc_state = enc_state
+            batch_size = self.batch_size
+
+        dec_cell = get_rnn_cell(self.config.unit_type,
+                                hidden_size=self.config.dec_hidden_size,
+                                num_layers=self.config.num_layers,
+                                dropout_keep_prob=self.dropout_keep_prob)
+
+        return dec_cell, enc_state
 
     def _build_decoder(self):
         with tf.variable_scope("dialog_decoder"):
@@ -110,131 +139,99 @@ class HREDModel(BaseTFModel):
                     self.config.vocab_size, use_bias=False, name="output_projection")
 
             with tf.variable_scope("decoder_rnn"):
-                dec_cell = get_rnn_cell(unit_type='gru',
-                                        hidden_size=self.config.dec_hidden_size,
-                                        num_layers=self.config.num_layers,
-                                        dropout_keep_prob=self.dropout_keep_prob)
+                dec_cell, dec_init_state = self._build_decoder_cell(enc_outputs=self.encoder_outputs,
+                                                                    enc_state=self.encoder_state)
 
-                enc_outputs = self._enc_outputs #batch * turn * hidden_size
-                enc_state = self._enc_state # batch * hidden_size
-
-                # dialog input embeddings(batch_size * turn_size * sent_size* emb_size)
-                dialog_emb_inp = tf.reshape(self._dialog_input_embs,
-                                            [self.batch_size, self.turn_size,
-                                             self.sent_size, self.config.emb_size])
-                print("dialog emb shape", dialog_emb_inp.shape)
-
-                # training
+                # Training or Eval
                 if self.mode != ModelMode.infer: # not infer, do decode turn by turn
+                    resp_emb_inp = tf.nn.embedding_lookup(self.decoder_embeddings, self.target_input)
+                    helper = tc_seq2seq.TrainingHelper(resp_emb_inp, self.target_length)
+                    decoder = tc_seq2seq.BasicDecoder(
+                        cell=dec_cell,
+                        helper=helper,
+                        initial_state=dec_init_state,
+                        output_layer=output_layer
+                    )
 
-                    turn_emb_inp = dialog_emb_inp[:, 1:, :-1, :]
+                    dec_outputs, dec_state, _ = tc_seq2seq.dynamic_decode(decoder)
+                    sample_id = dec_outputs.sample_id
+                    logits = dec_outputs.rnn_output
 
-                    turn_index = tf.constant(0, dtype=tf.int32, name='turn_time_index')
-                    turn_loss = tf.constant(0, dtype=tf.float32, name='turn_loss')
-
-                    # turn total ppl
-                    turn_ppl = tf.constant(0, dtype=tf.float32, name='turn_ppl')
-
-                    def _decode_by_turn(idx, loss, ppl):
-                        dec_init_state = enc_outputs[:, idx, :]
-                        # batch* (sent_length -1) * emb_size
-                        dec_emb_inp = dialog_emb_inp[:, idx+1, :-1, :]
-                        print("dec emb input shape", dec_emb_inp.shape)
-                        # remove eos to compute turn output length
-                        turn_output_length = self.dialog_length[:, idx+1] - 1
-
-
-                        dec_helper = tc_seq2seq.TrainingHelper(dec_emb_inp,
-                                                               sequence_length=turn_output_length)
-
-                        turn_decoder = tc_seq2seq.BasicDecoder(cell=dec_cell,
-                                                               helper=dec_helper,
-                                                               initial_state=dec_init_state,
-                                                               output_layer=output_layer)
-
-                        turn_dec_outputs, turn_dec_state, _ = tc_seq2seq.dynamic_decode(turn_decoder)
-                        turn_logits = turn_dec_outputs.rnn_output
-                        print('turn step output shape:', turn_logits.shape)
-
-                        # Note that output max time is the max length
-                        # remove sos as the actual output tokens
-                        dec_output_tokens = self.dialog_input[:, idx + 1, 1:1+tf.shape(turn_logits)[1]]
-                        # compute turn loss
-                        _loss, _ppl = self._compute_turn_loss(turn_logits, dec_output_tokens, turn_output_length)
-                        loss += _loss
-                        ppl += _ppl
-                        return [tf.add(idx, 1), loss, ppl]
-
-                    dec_turn, total_loss, total_ppl = tf.while_loop(cond = lambda  i, l, p: tf.less(i, self.turn_size-1),
-                                                             body = _decode_by_turn,
-                                                             loop_vars=[turn_index, turn_loss, turn_ppl])
-                    self._total_loss = total_loss
-                    self._total_ppl = total_ppl
-                    self.dec_turn = dec_turn
                 else:
-                    # do infer
-                    beam_size = self.config.beam_size
+                    beam_width = self.config.beam_size
                     length_penalty_weight = self.config.length_penalty_weight
                     maximum_iterations = tf.to_int32(self.config.infer_max_len)
-
                     start_tokens = tf.fill([self.batch_size], self.config.sos_idx)
                     end_token = self.config.eos_idx
 
-                    dec_init_state = tc_seq2seq.tile_batch(enc_state, multiplier=beam_size)
-
-
-                    # beam decoder
+                    # beam size
                     decoder = tc_seq2seq.BeamSearchDecoder(
                         cell=dec_cell,
-                        embedding=self.dialog_embeddings,
+                        embedding=self.decoder_embeddings,
                         start_tokens=start_tokens,
                         end_token=end_token,
                         initial_state=dec_init_state,
-                        beam_width=beam_size,
+                        beam_width=beam_width,
                         output_layer=output_layer,
                         length_penalty_weight=length_penalty_weight)
 
-                    dec_outputs, dec_state, _= tc_seq2seq.dynamic_decode(
-                        decoder=decoder,
-                        maximum_iterations=maximum_iterations)
+                    dec_outputs, dec_state, _ = tc_seq2seq.dynamic_decode(
+                        decoder,
+                        maximum_iterations=maximum_iterations,
+                    )
+                    logits = tf.no_op()
+                    sample_id = dec_outputs.predicted_ids
 
-                    self.predict_ids = dec_outputs.predicted_ids
-        pass
+                self.logits = logits
+                self.sample_id = sample_id
+
     def _compute_loss(self):
-        self.loss = self._total_loss
-        self.ppl = self._total_ppl
-        self.word_predict_count = tf.reduce_sum(self.dialog_length[:, 1:] - 1)
+        with tf.variable_scope('loss'):
+            """Compute optimization loss."""
+            batch_size = tf.shape(self.target_output)[0]
+            max_time = tf.shape(self.target_output)[1]
+
+            crossent = tf.nn.sparse_softmax_cross_entropy_with_logits(
+                labels=self.target_output, logits=self.logits)
+            target_weights = tf.sequence_mask(self.target_length, maxlen=max_time, dtype=self.logits.dtype)
+            loss = tf.reduce_sum(crossent * target_weights) / tf.to_float(batch_size)
+            self.loss = loss
+            self.exp_ppl = tf.reduce_sum(crossent * target_weights)
         pass
 
-    def train(self, sess, batch_data):
+    def train(self, sess, batch_input):
         assert self.mode == ModelMode.train
         feed_dict = {
-            self.dialog_input:batch_data.dialog,
-            self.dialog_length:batch_data.dialog_length,
-            self.dropout_keep_prob:self.config.dropout_keep_prob
+            self.source: batch_input.source,
+            self.source_length: batch_input.source_length,
+            self.target_input: batch_input.target_input,
+            self.target_output: batch_input.target_output,
+            self.target_length: batch_input.target_length,
+            self.dropout_keep_prob: self.config.dropout_keep_prob
         }
-
         res = sess.run([self.update_opt,
                         self.loss,
-                        self.ppl,
-                        self.word_predict_count,
+                        self.exp_ppl,
+                        self.predict_count,
                         self.batch_size,
                         self.train_summary,
-                        self.global_step,
-                        self.dec_turn
-                        ], feed_dict)
+                        self.global_step], feed_dict)
         return res[1:]
+        pass
 
-    def eval(self, sess, batch_data):
+    def eval(self, sess, batch_input):
         assert self.mode == ModelMode.eval
         feed_dict = {
-            self.dialog_input: batch_data.dialog,
-            self.dialog_length: batch_data.dialog_length,
+            self.source: batch_input.source,
+            self.source_length: batch_input.source_length,
+            self.target_input: batch_input.target_input,
+            self.target_output: batch_input.target_output,
+            self.target_length: batch_input.target_length,
             self.dropout_keep_prob: 1.0
         }
         res = sess.run([self.loss,
-                        self.ppl,
-                        self.word_predict_count,
+                        self.exp_ppl,
+                        self.predict_count,
                         self.batch_size,
                         self.global_step], feed_dict)
         return res
@@ -242,11 +239,10 @@ class HREDModel(BaseTFModel):
     def infer(self, sess, batch_data):
         assert self.mode == ModelMode.infer
         feed_dict = {
-            self.dialog_input: batch_data.dialog,
-            self.dialog_length: batch_data.dialog_length,
+            self.source: batch_data.source,
+            self.source_length: batch_data.source_length,
             self.dropout_keep_prob: 1.0
         }
-        res = sess.run([self.predict_ids,
-                       self.batch_size],
-                       feed_dict)
+        res = sess.run([self.sample_id,
+                        self.batch_size], feed_dict)
         return res
