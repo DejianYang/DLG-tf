@@ -5,6 +5,7 @@ UNK_WORD = '<unk>'
 SOS_WORD = '<s>'
 EOS_WORD = '</s>'
 
+
 class Vocabulary(object):
     def __init__(self, lower=False,
                  pad_word=None,
@@ -40,6 +41,7 @@ class Vocabulary(object):
     @property
     def eos_idx(self):
         return self.lookup(self._EOS_WORD)
+
     @property
     def pad_idx(self):
         return self.lookup(self._PAD_WORD)
@@ -158,8 +160,8 @@ class Vocabulary(object):
 
         return words
 
+
 def load_vocabulary(vocab_file):
     vocab = Vocabulary()
     vocab.load_file(vocab_file)
     return vocab
-

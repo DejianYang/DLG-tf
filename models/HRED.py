@@ -5,6 +5,7 @@ from tensorflow.python.layers import core as layers_core
 from models.model_base import *
 from models.model_helper import *
 
+
 class HREDModel(BaseTFModel):
     def __init__(self, config, mode, scope=None):
         super(HREDModel, self).__init__(config, mode, scope)
@@ -20,7 +21,7 @@ class HREDModel(BaseTFModel):
                 self.create_optimizer(self.loss)
                 # Training Summary
                 self.train_summary = tf.summary.merge([tf.summary.scalar("lr", self.learning_rate),
-                                                        tf.summary.scalar("train_loss", self.loss)]
+                                                       tf.summary.scalar("train_loss", self.loss)]
                                                       + self.grad_norm_summary)
 
     def _build_placeholders(self):
@@ -59,9 +60,9 @@ class HREDModel(BaseTFModel):
     def _build_embeddings(self):
         with tf.variable_scope("dialog_embeddings"):
             dialog_embeddings = tf.get_variable("dialog_embeddings",
-                                                     shape=[self.config.vocab_size, self.config.emb_size],
-                                                     dtype=tf.float32,
-                                                     trainable=True)
+                                                shape=[self.config.vocab_size, self.config.emb_size],
+                                                dtype=tf.float32,
+                                                trainable=True)
             # share encoder and decoder vocabulary
             self.encoder_embeddings = dialog_embeddings
             self.decoder_embeddings = dialog_embeddings
@@ -69,40 +70,37 @@ class HREDModel(BaseTFModel):
     def _build_encoder(self):
         with tf.variable_scope("dialog_encoder"):
             with tf.variable_scope('utterance_rnn'):
-                uttn_cell = get_rnn_cell(unit_type='gru',
-                                         hidden_size=self.config.enc_hidden_size,
-                                         num_layers=self.config.num_layers,
-                                         dropout_keep_prob=self.dropout_keep_prob)
+                uttn_hidden_size = self.config.emb_size * 2
+                uttn_encoder = RNNEncoder(unit_type='gru',
+                                          enc_type='bi',
+                                          hidden_size=uttn_hidden_size,
+                                          num_layers=self.config.num_layers,
+                                          dropout_keep_prob=self.dropout_keep_prob)
 
                 uttn_emb_inp = tf.nn.embedding_lookup(self.encoder_embeddings,
                                                       tf.reshape(self.source, [-1, self.sent_size]))
                 print('utterance input embs shape', uttn_emb_inp.shape)
 
-                _, uttn_states = tf.nn.dynamic_rnn(uttn_cell,
-                                                   inputs=uttn_emb_inp,
-                                                   sequence_length=tf.reshape(self.source_length, [-1]),
-                                                   dtype=tf.float32)
+                _, uttn_states = uttn_encoder(uttn_emb_inp, tf.reshape(self.source_length, [-1]))
 
                 uttn_states = tf.reshape(uttn_states, [self.batch_size,
                                                        self.turn_size,
-                                                       self.config.enc_hidden_size])
+                                                       uttn_hidden_size])
                 print('utterance shape', uttn_states.shape)
 
             with tf.variable_scope("context_rnn"):
-                ctx_cell = get_rnn_cell(unit_type='gru',
-                                        hidden_size=self.config.enc_hidden_size,
-                                        num_layers=self.config.num_layers,
-                                        dropout_keep_prob=self.dropout_keep_prob)
+                context_encoder = RNNEncoder(unit_type='gru',
+                                             enc_type='bi',
+                                             hidden_size=self.config.enc_hidden_size,
+                                             num_layers=self.config.num_layers,
+                                             dropout_keep_prob=self.dropout_keep_prob)
 
                 context_turn_length = tf.reduce_sum(tf.sign(self.source_length), axis=1)
 
-                ctx_outputs, ctx_state = tf.nn.dynamic_rnn(ctx_cell,
-                                                           inputs=uttn_states,
-                                                           sequence_length=context_turn_length,
-                                                           dtype=tf.float32)
+                ctx_outputs, ctx_state = context_encoder(uttn_states, context_turn_length)
+
                 self.encoder_outputs = ctx_outputs
                 self.encoder_state = ctx_state
-
 
     def _build_decoder_cell(self, enc_outputs, enc_state):
         beam_size = self.config.beam_size
@@ -117,7 +115,7 @@ class HREDModel(BaseTFModel):
                                            multiplier=beam_size)
 
             context_length = tc_seq2seq.tile_batch(context_length,
-                                               multiplier=beam_size)
+                                                   multiplier=beam_size)
 
             batch_size = self.batch_size * beam_size
 
@@ -143,7 +141,7 @@ class HREDModel(BaseTFModel):
                                                                     enc_state=self.encoder_state)
 
                 # Training or Eval
-                if self.mode != ModelMode.infer: # not infer, do decode turn by turn
+                if self.mode != ModelMode.infer:  # not infer, do decode turn by turn
                     resp_emb_inp = tf.nn.embedding_lookup(self.decoder_embeddings, self.target_input)
                     helper = tc_seq2seq.TrainingHelper(resp_emb_inp, self.target_length)
                     decoder = tc_seq2seq.BasicDecoder(

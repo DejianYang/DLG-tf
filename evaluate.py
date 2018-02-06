@@ -12,7 +12,7 @@ def parse_args():
     parser.add_argument("--hyp_file", type=str,
                         default="./data/ubuntu/raw_testing_responses.txt", help="response predict file")
     parser.add_argument("--ref_file", type=str,
-                        default="./data/ubuntu/ModelPredictions/HRED_Baseline/HRED_BeamSearch_5_GeneratedTestResponses.txt_First.txt", help="response gold file")
+                        default="./data/ubuntu/ModelPredictions/VHRED/First_VHRED_BeamSearch_5_GeneratedTestResponses.txt_First.txt", help="response gold file")
 
     return parser.parse_args()
 

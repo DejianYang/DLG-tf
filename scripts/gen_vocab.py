@@ -1,4 +1,6 @@
 # -*- coding:utf-8 -*-
+import os
+os.sys.path.append(os.path.join(os.path.dirname(__file__), "./../"))
 from utils.vocab import *
 
 
@@ -18,6 +20,6 @@ def gen_vocab(input_file, saved_path, vocab_size=None):
 
 
 if __name__ == '__main__':
-    #gen_vocab('../data/ubuntu/train.dialog.txt', "../data/ubuntu/vocab.dialog.txt", vocab_size=30000)
+    gen_vocab('../data/ubuntu/train.dialog.txt', "../data/ubuntu/vocab.dialog.txt", vocab_size=20000)
     gen_vocab('../data/ubuntu-10k/train.dialog.txt', "../data/ubuntu-10k/vocab.dialog.txt", vocab_size=10000)
     pass

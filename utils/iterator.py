@@ -4,6 +4,7 @@ import collections
 from utils.vocab import Vocabulary
 from utils.misc_utils import *
 
+
 class DialogBatchInput(
     collections.namedtuple("DialogBatchInput",
                            ("source",
@@ -13,17 +14,21 @@ class DialogBatchInput(
                             "target_length"))):
     pass
 
+
 class DialogBucket(object):
     def __init__(self, bucket_size, batch_size):
         self._bucket_size = bucket_size
         self._batch_size = batch_size
         self._bucket_data = []
+
     @property
     def bucket_size(self):
         return self._bucket_size
+
     @property
     def batch_size(self):
         return self._batch_size
+
     @property
     def num_samples(self):
         return len(self._bucket_data)
@@ -42,7 +47,7 @@ class DialogBucket(object):
             if end_idx > self.num_samples:
                 end_idx = self.num_samples
             batch_idx = idx[start_idx:end_idx]
-            batch_data =[self._bucket_data[i] for i in batch_idx]
+            batch_data = [self._bucket_data[i] for i in batch_idx]
             batches.append(batch_data)
             start_idx += self.batch_size
         return batches
@@ -91,8 +96,8 @@ class DialogIterator(object):
             if turns < 2:
                 ignore_samples += 1
                 continue
-            for i in range(turns-1):
-                reps_idx = i+1
+            for i in range(turns - 1):
+                reps_idx = i + 1
                 ii = 0 if reps_idx <= self._max_turn else reps_idx - self._max_turn
                 ctx = dialog[ii:reps_idx]
                 resp = dialog[reps_idx]
@@ -169,7 +174,7 @@ class DialogIterator(object):
             pad_sents = []
             pad_sent_lengths = []
 
-            pad_sent_max_length =  max_length
+            pad_sent_max_length = max_length
             for sent in turn_data:
                 if len(sent) > max_length:
                     sent = sent[:max_length]
@@ -212,16 +217,35 @@ class DialogIterator(object):
                 pad_resp_input, resp_length = self._dynamic_padding(resp_input_data)
                 pad_resp_output, _ = self._dynamic_padding(resp_output_data)
                 yield DialogBatchInput(source=pad_ctx,
-                                        source_length=pad_ctx_length,
-                                        target_input=pad_resp_input,
-                                        target_output=pad_resp_output,
-                                        target_length=resp_length)
+                                       source_length=pad_ctx_length,
+                                       target_input=pad_resp_input,
+                                       target_output=pad_resp_output,
+                                       target_length=resp_length)
 
         else:
-            raise NotImplementedError("not infer infer batches samples")
-        pass
+            # only use context when infer
+            batch_ctx_data = []
+            for ctx_data in self._dialog_data:
+                batch_ctx_data += [ctx_data]
 
-def get_dialog_data_iter(vocab:Vocabulary,
+                if len(batch_ctx_data) == self._batch_size:
+                    pad_ctx, pad_ctx_length = self._dynamic_padding_multi_turn(batch_ctx_data)
+                    yield DialogBatchInput(source=pad_ctx,
+                                           source_length=pad_ctx_length,
+                                           target_input=None,
+                                           target_output=None,
+                                           target_length=None)
+                    batch_ctx_data = []
+            if len(batch_ctx_data) > 0:
+                pad_ctx, pad_ctx_length = self._dynamic_padding_multi_turn(batch_ctx_data)
+                yield DialogBatchInput(source=pad_ctx,
+                                       source_length=pad_ctx_length,
+                                       target_input=None,
+                                       target_output=None,
+                                       target_length=None)
+
+
+def get_dialog_data_iter(vocab: Vocabulary,
                          dialog_file,
                          batch_size,
                          max_len=None,
@@ -236,63 +260,63 @@ def get_dialog_data_iter(vocab:Vocabulary,
     if model == 'HRED':
         data_iter = DialogIterator(dialog_data=dialog_idx,
                                    batch_size=batch_size,
-                             sos_idx=vocab.sos_idx,
-                             eos_idx=vocab.eos_idx,
-                             pad_idx=vocab.pad_idx,
-                             max_len=max_len,
-                             max_turn=max_turn,
-                             infer=infer,
-                                bucket_config=bucket_config)
+                                   sos_idx=vocab.sos_idx,
+                                   eos_idx=vocab.eos_idx,
+                                   pad_idx=vocab.pad_idx,
+                                   max_len=max_len,
+                                   max_turn=max_turn,
+                                   infer=infer,
+                                   shuffle=shuffle,
+                                   bucket_config=bucket_config)
         return data_iter
     else:
         raise NotImplementedError("Not Implemented Data Iterator")
 
 
 def get_train_iter(data_dir, vocab, config):
-
     train_file = os.path.join(data_dir, 'train.%s.txt' % config.prefix)
     train_iter = get_dialog_data_iter(vocab=vocab,
-                               dialog_file=train_file,
-                               batch_size=config.batch_size,
-                               max_len=config.max_len,
-                               max_turn=config.max_turn,
-                               model=config.model,
-                               bucket_config=config.buckets,
-                               infer=False,
-                               shuffle=True)
+                                      dialog_file=train_file,
+                                      batch_size=config.batch_size,
+                                      max_len=config.max_len,
+                                      max_turn=config.max_turn,
+                                      model=config.model,
+                                      bucket_config=config.buckets,
+                                      infer=False,
+                                      shuffle=True)
 
     valid_file = os.path.join(data_dir, 'valid.%s.txt' % config.prefix)
     valid_iter = get_dialog_data_iter(vocab=vocab,
-                               dialog_file=valid_file,
-                               batch_size=config.batch_size,
-                               max_len=config.max_len,
-                               max_turn=config.max_turn,
-                               model=config.model,
+                                      dialog_file=valid_file,
+                                      batch_size=config.batch_size,
+                                      max_len=config.max_len,
+                                      max_turn=config.max_turn,
+                                      model=config.model,
                                       bucket_config=config.buckets,
-                               infer=False,
-                               shuffle=False)
+                                      infer=False,
+                                      shuffle=False)
 
     test_file = os.path.join(data_dir, 'test.%s.txt' % config.prefix)
     test_iter = get_dialog_data_iter(vocab=vocab,
-                               dialog_file=test_file,
-                               batch_size=config.batch_size,
-                               max_len=config.max_len,
-                               max_turn=config.max_turn,
-                               model=config.model,
+                                     dialog_file=test_file,
+                                     batch_size=config.batch_size,
+                                     max_len=config.max_len,
+                                     max_turn=config.max_turn,
+                                     model=config.model,
                                      bucket_config=config.buckets,
-                               infer=False,
-                               shuffle=False)
+                                     infer=False,
+                                     shuffle=False)
 
     return train_iter, valid_iter, test_iter
 
+
 def get_infer_iter(context_file, vocab, config):
     infer_iter = get_dialog_data_iter(vocab=vocab,
-                               dialog_file=context_file,
-                               batch_size=config.infer_batch_size,
-                               max_len=config.max_len,
-                               max_turn=config.max_turn,
-                               model=config.model,
-                               infer=True,
-                               shuffle=False)
+                                      dialog_file=context_file,
+                                      batch_size=config.infer_batch_size,
+                                      max_len=config.max_len,
+                                      max_turn=config.max_turn,
+                                      model=config.model,
+                                      infer=True,
+                                      shuffle=False)
     return infer_iter
-

@@ -53,11 +53,11 @@ class RNNEncoder(object):
         else:
             raise NotImplementedError("Not Implemented Encode Type: %s" % enc_type)
 
-    def __call__(self, inputs, length=None, *args, **kwargs):
+    def __call__(self, inputs, sequence_length=None, *args, **kwargs):
         if self.enc_type == 'uni':
             enc_outputs, enc_state = tf.nn.dynamic_rnn(cell=self._enc_cell,
                                                        inputs=inputs,
-                                                       sequence_length=length,
+                                                       sequence_length=sequence_length,
                                                        dtype=tf.float32,
                                                        swap_memory=True)
             return enc_outputs, enc_state
@@ -65,7 +65,7 @@ class RNNEncoder(object):
             bi_enc_outputs, bi_enc_state = tf.nn.bidirectional_dynamic_rnn(cell_fw=self._enc_fw_cell,
                                                                            cell_bw=self._enc_bw_cell,
                                                                            inputs=inputs,
-                                                                           sequence_length=length,
+                                                                           sequence_length=sequence_length,
                                                                            dtype=tf.float32,
                                                                            swap_memory=True)
             return tf.concat(bi_enc_outputs, axis=-1), tf.concat(bi_enc_state, axis=-1)

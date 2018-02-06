@@ -10,21 +10,28 @@ from utils.iterator import *
 import utils.misc_utils as utils
 from utils.eval_utils import evaluate
 
-def run_evaluate(sess, eval_model, infer_model,
-                 vocab, global_step, pred_dir,
-                 data_iter, gold_tgt_file, mode):
 
+def run_evaluate(sess, eval_model, infer_model,
+                 vocab, config, global_step, data_dir, pred_dir,
+                 data_iter, mode):
+    assert mode in ["valid", "test"]
     loss, ppl = _run_internal_eval(sess, eval_model, data_iter)
-    pred_sents = _run_external_eval(sess, infer_model, data_iter, vocab)
+
+    ctx_file = os.path.join(data_dir, "%s.context.txt" % mode)
+    resp_file = os.path.join(data_dir, "%s.response.txt" % mode)
+
+    infer_iter = get_infer_iter(context_file=ctx_file, vocab=vocab, config=config)
+    pred_sents = _run_external_eval(sess, infer_model, infer_iter, vocab)
 
     pred_tgt_file = os.path.join(pred_dir, "%s_e%d_ppl_%.2f_loss_%.2f.pred.txt" %
                                  (mode, global_step, ppl, loss))
 
     utils.save_sentences(pred_sents, pred_tgt_file)
 
-    bleu = 0 #evaluate(gold_tgt_file, pred_tgt_file)
+    bleu = evaluate(resp_file, pred_tgt_file)
 
     return loss, ppl, bleu
+
 
 def _run_internal_eval(sess, eval_model, eval_iter):
     eval_loss, eval_predict_count, eval_samples = 0.0, 0, 0
@@ -50,8 +57,8 @@ def _run_external_eval(sess, infer_model, infer_iter, tgt_vocab, num_response_pe
                 predict_sents.append(predict_sent)
     return predict_sents
 
-def load_vocab_setup_config(args):
 
+def load_vocab_setup_config(args):
     # load vocab from precessed vocab file
     vocab_file = os.path.join(args.data_dir, "vocab.dialog.txt")
     vocab = load_vocabulary(vocab_file)
@@ -65,15 +72,16 @@ def load_vocab_setup_config(args):
 
     return vocab, config
 
+
 def train(args):
     start_time = time.time()
     vocab, model_config = load_vocab_setup_config(args)
-    print('... load vocab and setup model config over, cost:\t%.2f s' % (time.time()- start_time))
-    print('... vocab size:\t%d'% vocab.size)
+    print('... load vocab and setup model config over, cost:\t%.2f s' % (time.time() - start_time))
+    print('... vocab size:\t%d' % vocab.size)
 
     start_time = time.time()
     train_iter, valid_iter, test_iter = get_train_iter(args.data_dir, vocab=vocab, config=model_config)
-    print('-'*100)
+    print('-' * 100)
     print('... load train and valid data iterator over, cost:\t%.2f s' % (time.time() - start_time))
     print('... train iterator samples:\t%d' % train_iter.num_samples)
     print('... valid iterator samples:\t%d' % valid_iter.num_samples)
@@ -91,12 +99,6 @@ def train(args):
     utils.mkdir_not_exists(pred_dir)
     ckpt_path = os.path.join(ckpt_dir, model_config.model)
 
-    valid_context_file = os.path.join(args.data_dir, 'valid.source.txt')
-    valid_response_file = os.path.join(args.data_dir, 'valid.response.txt')
-
-    test_context_file = os.path.join(args.data_dir, 'test.source.txt')
-    test_response_file = os.path.join(args.data_dir, 'test.response.txt')
-
     print('=' * 100)
     print('... building model')
     start_time = time.time()
@@ -106,7 +108,7 @@ def train(args):
         raise NotImplementedError("No such model")
 
     config_proto = tf.ConfigProto()
-    config_proto.gpu_options.per_process_gpu_memory_fraction  = 0.9
+    config_proto.gpu_options.per_process_gpu_memory_fraction = 0.9
     with tf.Session(config=config_proto) as sess:
         initializer = tf.random_uniform_initializer(-1.0 * model_config.init_w, model_config.init_w)
         scope = model_config.model
@@ -129,6 +131,7 @@ def train(args):
     start_time = time.time()
     ckpt_loss, ckpt_ppl, ckpt_predict_count, ckpt_samples = 0.0, 0.0, 0, 0
     for epoch in range(model_config.max_epoch):
+        train_samples = 0
         for batch_data in train_iter.next_batch():
             # print("batch data shape:", batch_data.dialog.shape, "batch length shape:", batch_data.dialog_length.shape)
             # print(batch_data.dialog_length)
@@ -139,15 +142,18 @@ def train(args):
             ckpt_loss += step_loss * batch_size
             ckpt_ppl += step_ppl
             ckpt_predict_count += step_predict_count
+            train_samples += batch_size
 
             summary_writer.add_summary(step_summary, global_step)
 
             if global_step % model_config.display_frequency == 0:
                 train_loss = ckpt_loss / ckpt_samples
                 train_ppl = safe_exp(ckpt_ppl / ckpt_predict_count)
-                print('Epoch: %d/%d; Step: %d; Train Loss: %.2f; Train PPL: %.2f; Time Cost: %.2fs' %
-                      (epoch+1,
+                print('Epoch: %d/%d; Samples: %d/%d; Step: %d; Train Loss: %.2f; Train PPL: %.2f; Time Cost: %.2fs' %
+                      (epoch + 1,
                        model_config.max_epoch,
+                       train_samples,
+                       train_iter.num_samples,
                        global_step,
                        train_loss,
                        train_ppl,
@@ -162,8 +168,11 @@ def train(args):
                 print("--------- evaluate model ------------")
                 start_time = time.time()
                 valid_loss, valid_ppl, valid_bleu = run_evaluate(sess, eval_model, infer_model,
-                                                                     vocab, global_step, pred_dir,
-                                                                     valid_iter, valid_response_file, "valid")
+                                                                 vocab, model_config,
+                                                                 global_step,
+                                                                 args.data_dir,
+                                                                 pred_dir,
+                                                                 valid_iter, "valid")
 
                 print('Epoch: %d/%d; Step: %d; Valid Loss: %.2f; Valid PPL: %.2f; Valid Bleu:%.2f; Time Cost: %.2fs' %
                       (epoch + 1,
@@ -174,12 +183,14 @@ def train(args):
                        valid_bleu,
                        time.time() - start_time))
 
-                start_time =  time.time()
-
+                start_time = time.time()
 
                 test_loss, test_ppl, test_bleu = run_evaluate(sess, eval_model, infer_model,
-                                                                 vocab, global_step, pred_dir,
-                                                              test_iter, test_response_file, "test")
+                                                              vocab, model_config,
+                                                              global_step,
+                                                              args.data_dir,
+                                                              pred_dir,
+                                                              test_iter, "test")
 
                 print('Epoch: %d/%d; Step: %d; Test Loss: %.2f; Test PPL: %.2f; Test Bleu:%.2f; Time Cost: %.2fs' %
                       (epoch + 1,
@@ -204,8 +215,8 @@ def train(args):
     # done training
     summary_writer.close()
 
-
     pass
+
 
 def parse_args():
     """

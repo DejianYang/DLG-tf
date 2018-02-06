@@ -2,34 +2,7 @@
 import time
 import tensorflow as tf
 import tensorflow.contrib as tc
-
-
-def get_rnn_cell(unit_type, hidden_size, num_layers=1, dropout_keep_prob=None):
-    """
-    Gets the RNN Cell
-    Args:
-        unit_type: 'lstm', 'gru' or 'rnn'
-        hidden_size: The size of hidden units
-        num_layers: MultiRNNCell are used if num_layers > 1
-        dropout_keep_prob: dropout in RNN
-    Returns:
-        An RNN Cell
-    """
-    if unit_type.endswith('lstm'):
-        cell = tc.rnn.LSTMCell(num_units=hidden_size, state_is_tuple=True)
-    elif unit_type.endswith('gru'):
-        cell = tc.rnn.GRUCell(num_units=hidden_size)
-    elif unit_type.endswith('rnn'):
-        cell = tc.rnn.BasicRNNCell(num_units=hidden_size)
-    else:
-        raise NotImplementedError('Unsuported rnn type: {}'.format(unit_type))
-    if dropout_keep_prob is not None:
-        cell = tc.rnn.DropoutWrapper(cell,
-                                     input_keep_prob=dropout_keep_prob,
-                                     output_keep_prob=dropout_keep_prob)
-    if num_layers > 1:
-        cell = tc.rnn.MultiRNNCell([cell] * num_layers, state_is_tuple=True)
-    return cell
+from models.layers.rnn_encoder import *
 
 
 def gaussian_kld(recog_mu, recog_logvar, prior_mu, prior_logvar):

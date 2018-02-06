@@ -1,12 +1,15 @@
 # -*- coding:utf-8 -*-
 import tensorflow as tf
+
 """
 Base TensorFlow Model 
 """
 
 from enum import Enum, unique
+
+
 @unique
-class ModelMode(Enum): # three modes for models
+class ModelMode(Enum):  # three modes for models
     train = 1,
     eval = 2,
     infer = 3
@@ -108,11 +111,5 @@ class BaseTFModel(object):
     def eval(self, sess, data_iter):
         raise NotImplementedError
 
-    def test(self):
-        pass
-
     def save(self, sess, saved_path):
         self.saver.save(sess, saved_path, global_step=self.global_step)
-
-
-
