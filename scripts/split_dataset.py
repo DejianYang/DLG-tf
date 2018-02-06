@@ -1,7 +1,6 @@
 # -*- coding:utf-8 -*-
 import numpy as np
 
-
 def split(dialog_file, saved_file):
     dialogs = []
     turns = []
@@ -43,14 +42,14 @@ def split_context_response_pairs(dialog_file, ctx_file=None, resp_file=None):
 
 
 if __name__ == '__main__':
-    split('./raw_training_text.txt', "./ubuntu/train.dialog.txt")
-    split_small("./ubuntu/train.dialog.txt", './ubuntu-10k/train.dialog.txt', 10000)
-    split('./raw_valid_text.txt', "./ubuntu/valid.dialog.txt")
-    split_small("./ubuntu/valid.dialog.txt", './ubuntu-10k/valid.dialog.txt', 1000)
-    split('./raw_test_text.txt', "./ubuntu/test.dialog.txt")
-    split_small("./ubuntu/test.dialog.txt", './ubuntu-10k/test.dialog.txt', 1000)
+    # split('./raw_training_text.txt', "./ubuntu/train.dialog.txt")
+    # split_small("./ubuntu/train.dialog.txt", './ubuntu-10k/train.dialog.txt', 10000)
+    # split('./raw_valid_text.txt', "./ubuntu/valid.dialog.txt")
+    # split_small("./ubuntu/valid.dialog.txt", './ubuntu-10k/valid.dialog.txt', 1000)
+    # split('./raw_test_text.txt', "./ubuntu/test.dialog.txt")
+    # split_small("./ubuntu/test.dialog.txt", './ubuntu-10k/test.dialog.txt', 1000)
 
-    split_context_response_pairs("./ubuntu/valid.dialog.txt")
-    split_context_response_pairs("./ubuntu/test.dialog.txt")
-    split_context_response_pairs("./ubuntu-10k/valid.dialog.txt")
-    split_context_response_pairs("./ubuntu-10k/test.dialog.txt")
+    # split_context_response_pairs("./ubuntu/valid.dialog.txt")
+    # split_context_response_pairs("./ubuntu/test.dialog.txt")
+    split_context_response_pairs("../data/ubuntu-10k/valid.dialog.txt")
+    split_context_response_pairs("../data/ubuntu-10k/test.dialog.txt")
