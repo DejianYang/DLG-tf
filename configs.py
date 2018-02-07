@@ -61,7 +61,7 @@ class HREDTestConfig(HREDConfig):
 
     prefix = "dialog"
     # model configs
-    unit_type = "gru"  # gru or lstm
+    unit_type = "lstm"  # gru or lstm
     emb_size = 100  # word embedding size
     enc_hidden_size = 300  # encoder hidden size
     dec_hidden_size = 300  # decoder hidden size

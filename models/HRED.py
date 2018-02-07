@@ -72,7 +72,7 @@ class HREDModel(BaseTFModel):
             with tf.variable_scope('utterance_rnn'):
                 uttn_hidden_size = self.config.emb_size * 2
                 uttn_encoder = RNNEncoder(unit_type='gru',
-                                          enc_type='bi',
+                                          enc_type='uni',
                                           hidden_size=uttn_hidden_size,
                                           num_layers=self.config.num_layers,
                                           dropout_keep_prob=self.dropout_keep_prob)
@@ -89,7 +89,7 @@ class HREDModel(BaseTFModel):
                 print('utterance shape', uttn_states.shape)
 
             with tf.variable_scope("context_rnn"):
-                context_encoder = RNNEncoder(unit_type='gru',
+                context_encoder = RNNEncoder(unit_type=self.config.unit_type,
                                              enc_type='bi',
                                              hidden_size=self.config.enc_hidden_size,
                                              num_layers=self.config.num_layers,
